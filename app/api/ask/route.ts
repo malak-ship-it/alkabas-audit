@@ -2,11 +2,16 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 export async function POST(req: Request) {
   try {
+    // 🔒 Prevent silent failure
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error("Missing OpenAI API key");
+    }
+
     const body = await req.json();
     const messages = body.messages || [];
     const company = body.company || "Unknown Company";
@@ -47,6 +52,13 @@ AUDIT FLOW (MANDATORY ORDER):
 
 ---
 
+DEPTH CONTROL:
+- Each section MUST have at least 2–3 probing questions before moving forward
+- Do NOT move to next section unless the current one is clearly understood
+- If answers are vague → ask deeper follow-up questions
+
+---
+
 COMPLETION RULE:
 DO NOT generate a report unless ALL areas above are clearly understood.
 
@@ -80,31 +92,33 @@ CONTEXT:
 ${formattedHistory}
 `;
 
-    const completion = await openai.chat.completions.create({
+    // ✅ FIXED (no response_format — avoids build failure)
+    const completion = await openai.responses.create({
       model: "gpt-4.1-mini",
-      messages: [{ role: "system", content: prompt }],
-      response_format: { type: "json_object" },
+      input: prompt,
     });
 
-    const content = completion.choices[0].message?.content || "{}";
+    const content = completion.output_text || "{}";
 
     let parsed;
+
     try {
       parsed = JSON.parse(content);
     } catch {
       parsed = {
         type: "question",
-        question: "وضح أكثر عن بيئة العمل لديكم",
+        question:
+          "لم يتم فهم الإجابة السابقة بشكل كافٍ، هل يمكنك توضيح التفاصيل التقنية أكثر؟",
       };
     }
 
     return NextResponse.json(parsed);
   } catch (err) {
-    console.error(err);
+    console.error("API ERROR:", err);
 
     return NextResponse.json({
       type: "question",
-      question: "حدث خطأ، أعد المحاولة",
+      question: "حدث خطأ في النظام، يرجى المحاولة مرة أخرى",
     });
   }
 }
